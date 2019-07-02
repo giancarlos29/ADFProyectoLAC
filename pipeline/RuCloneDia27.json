@@ -1,0 +1,195 @@
+{
+	"name": "RuCloneDia27",
+	"properties": {
+		"activities": [
+			{
+				"name": "GETCFG",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SqlServerSource",
+						"sqlReaderQuery": {
+							"value": "SELECT * from @{pipeline().parameters.ConfigTable} where enabled = 1 IF @@ROWCOUNT = 0 THROW 50000,'No rows in configuration table!',1",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "ClippersDeRedShiftaSQLServer",
+						"type": "DatasetReference",
+						"parameters": {
+							"TableName": {
+								"value": "@pipeline().parameters.ConfigTable",
+								"type": "Expression"
+							}
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "For Each RedShiftaSQL",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "AWS REDSHIFT CFG",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('AWS REDSHIFT CFG').output.value",
+						"type": "Expression"
+					},
+					"activities": [
+						{
+							"name": "Copy From AWS",
+							"type": "Copy",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AmazonRedshiftSource",
+									"query": {
+										"value": "SELECT @{item().Cols} FROM @{item().SRC_tab}\n",
+										"type": "Expression"
+									}
+								},
+								"sink": {
+									"type": "SqlServerSink",
+									"preCopyScript": {
+										"value": "truncate table @{item().DST_Tab}",
+										"type": "Expression"
+									}
+								},
+								"enableStaging": false
+							},
+							"inputs": [
+								{
+									"referenceName": "AmazonRedShift",
+									"type": "DatasetReference",
+									"parameters": {
+										"TableName": {
+											"value": "@pipeline().parameters.ConfigTable",
+											"type": "Expression"
+										}
+									}
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "ClippersDeRedShiftaSQLServer",
+									"type": "DatasetReference",
+									"parameters": {
+										"TableName": {
+											"value": "@{item().DST_tab}",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						},
+						{
+							"name": "SqlServerStoredProcedure1",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "Copy From AWS",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[load].[sp_UpdateWatermak]",
+								"storedProcedureParameters": {
+									"id": {
+										"value": {
+											"value": "@{item().id}",
+											"type": "Expression"
+										},
+										"type": "int16"
+									},
+									"NewWatermark": {
+										"value": {
+											"value": "@formatDateTime(utcnow())",
+											"type": "Expression"
+										},
+										"type": "DateTime"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "ClippersRedShiftASQLServer",
+								"type": "LinkedServiceReference"
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "AWS REDSHIFT CFG",
+				"type": "Filter",
+				"dependsOn": [
+					{
+						"activity": "GETCFG",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('GETCFG').output.value",
+						"type": "Expression"
+					},
+					"condition": {
+						"value": "@equals(item().SRC_name, 'NotDate')",
+						"type": "Expression"
+					}
+				}
+			}
+		],
+		"parameters": {
+			"ConfigTable": {
+				"type": "string",
+				"defaultValue": "load.Config"
+			}
+		},
+		"variables": {
+			"varLaClippers": {
+				"type": "String",
+				"defaultValue": "dummy"
+			}
+		},
+		"annotations": []
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
